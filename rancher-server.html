@@ -1,0 +1,73 @@
+<h1>Rancher Server Installation</h1>
+<div id="point-4" data-magellan-target="point-4" class="tutorial-block">
+<h2>Configuring SSL - Optional</h2>
+<p></p><p>Now that you have Docker installed and ready, you could already jump right into deploying the Rancher container. However, we’d recommend you to obtain and install SSL certificates to enable HTTPS for secure connection while you are configuring your cluster on Rancher. Luckily, this is quick and painless thanks to Let’s Encrypt.</p>
+<p>Note that you will need to have a domain configured to point to your Rancher server.</p>
+<h3>Let’s Encrypt</h3>
+<p>Let’s Encrypt offers free SSL certificates and makes the installation simple with their Certbot. The client can be installed by itself on most Linux distributions but since we already have Docker, we might as well put that into good use!</p>
+<p>Obtain SSL certificates using a containerised Let’s Encrypt Certbot.</p>
+<p>First, make a new directory to hold your certificates.</p>
+<pre>mkdir -p ~/docker/letsencrypt</pre>
+<p>Then run the following command to start a new Certbot container in a standalone certonly mode. Replace the example domain highlighted in red with your own.</p>
+<pre>docker run -it --rm -p 80:80 -v ~/docker/letsencrypt:/etc/letsencrypt \
+certbot/certbot certonly --standalone -d <span style="color: #ff0000;">rancher.example.com</span></pre>
+<p>Once the Certbot client starts, it will ask you to confirm a couple of settings.</p>
+<ol>
+<li>Enter an email address to receive SSL expiration notifications</li>
+<li>Read the Let’s Encrypt Terms of Service and select A to agree</li>
+<li>Check that the certificate was issued successfully</li>
+</ol>
+<p>Alright! Now that you’ve obtained the certificates, you will need to set up a way for your Rancher server to use them. Although the Rancher container already includes a web server, we are going to install the certificates to an Nginx proxy container.</p>
+<h3>Nginx</h3>
+<p>Nginx is one of the most popular web servers and includes options to be configured as a web proxy. Proxies allow you to listen and accept connections in one software, or container in this case and forward the connection to the actual service.</p>
+<p>To get started, you’ll need to make a new directory to house your proxy configuration.</p>
+<pre>mkdir -p ~/docker/nginx</pre>
+<p>Next, create a configuration file using your favourite text editor, for example,&nbsp;<em>nano</em> on Ubuntu.</p>
+<pre>nano&nbsp;~/docker/nginx/default.conf</pre>
+<p>Then enter the following configuration into the file. Again, replace all four occurrences of the example domain highlighted in red with your own domain.</p>
+<pre>upstream rancher {
+    server rancher-server;
+}
+
+map $http_upgrade $connection_upgrade {
+    default Upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name <span style="color: #ff0000;">rancher.example.com</span>;
+    ssl_certificate /etc/letsencrypt/live/<span style="color: #ff0000;">rancher.example.com</span>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<span style="color: #ff0000;">rancher.example.com</span>/privkey.pem;
+
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass http://rancher;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 900s;
+    }
+}
+
+server {
+    listen 80;
+    server_name <span style="color: #ff0000;">rancher.example.com</span>;
+    return 301 https://$server_name$request_uri;
+}</pre>
+<p>Once done, save the file and exit the editor.</p>
+<p>Next, create a network to connect your containers using the command below. This will allow the containers to communicate with each other.</p>
+<pre>sudo docker network create rancher-network</pre>
+<p>Then create the Nginx proxy container with the command below but we are not starting it just yet.</p>
+<pre>sudo docker create -p 443:443 -p 80:80 \
+-v ~/docker/letsencrypt:/etc/letsencrypt \
+-v ~/docker/nginx:/etc/nginx/conf.d \
+--restart=unless-stopped \
+--network=rancher-network \
+--name=nginx-proxy nginx</pre>
+<p>Now that the proxy is ready, you need to set up the Rancher container before you can run the proxy. Continue in the next part to deploy Rancher.</p>
+<p></p>
+</div>
